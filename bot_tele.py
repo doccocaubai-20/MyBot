@@ -2,13 +2,29 @@ import telebot
 import requests
 import threading
 import time
+from flask import Flask
+from threading import Thread
 
-# --- CẤU HÌNH ---
-API_TOKEN = '8525540577:AAFXfGdYgpcoJPC80zjYVlATLeJkqk1iHdE'
+# --- PHẦN 1: TẠO WEB GIẢ ĐỂ LỪA RENDER ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I'm alive! Bot đang chạy ngon lành."
+
+def run_http():
+    # Mở cổng 8080 (để Render nhìn thấy)
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_http)
+    t.start()
+
+# --- PHẦN 2: LOGIC CỦA BOT ---
+API_TOKEN = '8525540577:AAFXfGdYgpcoJPC80zjYVlATLeJkqk1iHdE' # Token của bạn
 bot = telebot.TeleBot(API_TOKEN)
 
 # Danh sách các lệnh cảnh báo
-# Cấu trúc: {"chat_id": 123, "coin": "BTC", "target": 95000}
 watch_list = []
 
 def lay_gia_coin(symbol):
@@ -19,42 +35,39 @@ def lay_gia_coin(symbol):
     except:
         return None
 
-# --- LUỒNG CHẠY NGẦM (BẢO VỆ) ---
+# Luồng chạy ngầm (Canh giá)
 def luong_canh_gia():
     print("👀 Đang kích hoạt chế độ canh giá...")
     while True:
-        # Duyệt qua danh sách các lệnh đang chờ
-        # Dùng copy() để tránh lỗi khi xóa phần tử trong lúc duyệt
-        for order in watch_list.copy(): 
-            chat_id = order['chat_id']
-            coin = order['coin']
-            target = order['target']
+        try:
+            for order in watch_list.copy():
+                chat_id = order['chat_id']
+                coin = order['coin']
+                target = order['target']
+                
+                gia_hien_tai = lay_gia_coin(coin)
+                
+                # Nếu giá tụt xuống dưới mức target -> Báo động
+                if gia_hien_tai and gia_hien_tai <= target:
+                    msg = (
+                        f"🚨 <b>BÁO ĐỘNG SẾP ƠI!</b> 🚨\n\n"
+                        f"📉 <b>{coin}</b> đã tụt xuống mức <b>${gia_hien_tai:,.2f}</b>\n"
+                        f"(Mục tiêu: ${target:,.2f})\n\n"
+                        f"👉 Vào hốt ngay kẻo lỡ!"
+                    )
+                    try:
+                        bot.send_message(chat_id, msg, parse_mode="HTML")
+                        watch_list.remove(order) # Xóa lệnh để đỡ báo lại
+                    except Exception as e:
+                        print(f"Lỗi gửi tin: {e}")
+        except Exception as e:
+            print(f"Lỗi luồng canh giá: {e}")
             
-            gia_hien_tai = lay_gia_coin(coin)
-            
-            if gia_hien_tai and gia_hien_tai <= target:
-                # --- GIÁ ĐÃ CHẠM MỐC! BÁO ĐỘNG! ---
-                msg = (
-                    f"🚨 <b>BÁO ĐỘNG SẾP ƠI!</b> 🚨\n\n"
-                    f"📉 <b>{coin}</b> đã tụt xuống mức <b>${gia_hien_tai:,.2f}</b>\n"
-                    f"(Mục tiêu: ${target:,.2f})\n\n"
-                    f"👉 Vào hốt ngay kẻo lỡ!"
-                )
-                try:
-                    bot.send_message(chat_id, msg, parse_mode="HTML")
-                    # Báo xong thì xóa lệnh này đi để đỡ báo lại liên tục
-                    watch_list.remove(order) 
-                except Exception as e:
-                    print(f"Lỗi gửi tin: {e}")
-        
-        # Nghỉ 10 giây rồi check tiếp (Đừng check nhanh quá Binance khóa IP)
-        time.sleep(10)
+        time.sleep(10) # Nghỉ 10s
 
-# --- XỬ LÝ TIN NHẮN ---
-
+# Xử lý lệnh /canh
 @bot.message_handler(commands=['canh'])
 def dat_lenh_canh(message):
-    # Cú pháp: /canh btc 90000
     try:
         text = message.text.split()
         if len(text) < 3:
@@ -64,7 +77,6 @@ def dat_lenh_canh(message):
         coin = text[1].upper()
         target = float(text[2])
         
-        # Lưu vào danh sách theo dõi
         new_order = {
             "chat_id": message.chat.id,
             "coin": coin,
@@ -89,11 +101,15 @@ def xem_danh_sach(message):
         msg += f"- {order['coin']}: Chờ dưới ${order['target']}\n"
     bot.reply_to(message, msg, parse_mode="HTML")
 
-# --- MAIN ---
-# Kích hoạt luồng chạy ngầm trước
-t = threading.Thread(target=luong_canh_gia)
-t.start()
+# --- PHẦN 3: CHẠY CHƯƠNG TRÌNH ---
+if __name__ == "__main__":
+    # 1. Kích hoạt Web giả (để Render không tắt)
+    keep_alive()
+    
+    # 2. Kích hoạt luồng canh giá ngầm
+    t = threading.Thread(target=luong_canh_gia)
+    t.start()
 
-# Kích hoạt Bot
-print("✅ Bot Pro đang chạy...")
-bot.infinity_polling()
+    # 3. Kích hoạt Bot chính
+    print("✅ Bot Pro đang chạy...")
+    bot.infinity_polling()
