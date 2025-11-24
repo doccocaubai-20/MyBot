@@ -28,13 +28,29 @@ bot = telebot.TeleBot(API_TOKEN)
 watch_list = []
 
 def lay_gia_coin(symbol):
+    # Tạo cặp tiền, ví dụ: BTC -> BTCUSDT
+    pair = symbol.upper() + "USDT"
+    url = f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
+    
     try:
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT"
-        resp = requests.get(url).json()
-        return float(resp['price'])
-    except:
+        # Thêm timeout để không bị treo nếu mạng lag
+        resp = requests.get(url, timeout=5)
+        
+        # In ra để kiểm tra xem Binance trả về cái gì
+        # print(f"Binance trả về: {resp.text}") 
+        
+        data = resp.json()
+        
+        if "price" in data:
+            return float(data['price'])
+        else:
+            # Nếu Binance báo lỗi (Ví dụ: Invalid symbol)
+            print(f"❌ Lỗi Binance: {data}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Lỗi kết nối API: {e}")
         return None
-
 # Luồng chạy ngầm (Canh giá)
 def luong_canh_gia():
     print("👀 Đang kích hoạt chế độ canh giá...")
@@ -77,6 +93,14 @@ def dat_lenh_canh(message):
         coin = text[1].upper()
         target = float(text[2])
         
+        # 1. Kiểm tra giá trước
+        gia_now = lay_gia_coin(coin)
+        
+        if gia_now is None:
+            bot.reply_to(message, f"❌ Không tìm thấy coin <b>{coin}</b> hoặc API bị chặn!", parse_mode="HTML")
+            return # Dừng lại, không lưu lệnh canh nữa
+
+        # 2. Nếu có giá thì mới lưu
         new_order = {
             "chat_id": message.chat.id,
             "coin": coin,
@@ -84,12 +108,10 @@ def dat_lenh_canh(message):
         }
         watch_list.append(new_order)
         
-        gia_now = lay_gia_coin(coin)
         bot.reply_to(message, f"✅ Đã cài báo thức!\nKhi nào <b>{coin}</b> tụt xuống <b>${target}</b> em sẽ gọi.\n(Giá hiện tại: ${gia_now})", parse_mode="HTML")
         
-    except Exception:
-        bot.reply_to(message, "❌ Lỗi rồi! Số tiền phải là số nhé.")
-
+    except Exception as e:
+        bot.reply_to(message, f"❌ Lỗi xử lý: {e}")
 @bot.message_handler(commands=['list'])
 def xem_danh_sach(message):
     if not watch_list:
